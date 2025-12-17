@@ -1,5 +1,5 @@
 --[[ 
-    DIAMOND ADM - ULTIMATE EDITION (V11.5 - CUSTOM LAYOUT)
+    DIAMOND ADM - ULTIMATE EDITION (V11.6 - AUTO-SELECT FIX)
     Optimization Logs:
     - Added Remote Caching (Prevents scanning ReplicatedStorage on every click)
     - Added Save Debounce (Prevents disk lag when typing numbers quickly)
@@ -7,16 +7,16 @@
     - Cleaned up Thread Scheduling (Uses task.delay instead of spawn/wait)
     - Maintained full compatibility with DiamondShortcut_UI
     
-    Update Log V11.5:
-    - Select All agora persiste após reexecutar o script e seleciona players automaticamente.
-    - Botões de Slot movidos para baixo da Resolução.
+    Update Log V11.6:
+    - FIX CRÍTICO: Agora o Select All espera o personagem carregar antes de tentar selecionar.
+    - Mantido layout personalizado (Slots embaixo da resolução).
 ]]
 
 -- ==============================================================================
 -- 1. SISTEMA DE SALVAMENTO & CONFIG
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
-local FileName = "DiamondADM_Config_V11.json" -- Mantendo mesmo arquivo
+local FileName = "DiamondADM_Config_V11.json" 
 
 local COMMANDS = {
     {Name = "JAIL",      Cmd = "jail"},
@@ -57,7 +57,7 @@ local Resolutions = {
     {800, 450, "X-Large (800x450)"}
 }
 
--- OTIMIZAÇÃO: Debounce no salvamento para evitar lag de disco
+-- OTIMIZAÇÃO: Debounce no salvamento
 local SaveTask = nil
 local function RequestSaveConfig()
     if not writefile then return end
@@ -93,7 +93,6 @@ local function LoadConfig()
                         end
                     end
                 end
-                -- Carrega o estado do SelectAll
                 if decoded.SelectAll ~= nil then Config.SelectAll = decoded.SelectAll end
                 if decoded.Keybind then Config.Keybind = decoded.Keybind end
                 if decoded.ToggleKey then Config.ToggleKey = decoded.ToggleKey end
@@ -138,37 +137,6 @@ local function SetCommandExclusive(slotIdx, cmdKey, active)
     Config.Slots[slotIdx][cmdKey].Active = active
 end
 
--- Lógica para selecionar players automaticamente
-local function AutoAssignTop3ByDistance()
-    local myChar = LocalPlayer.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    
-    -- Se o player ainda não carregou, tentamos pegar a posição da câmera ou esperar um pouco
-    if not myRoot then return end
-
-    local others = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            local dist = (p.Character.HumanoidRootPart.Position - myRoot.Position).Magnitude
-            table.insert(others, {Player = p, Dist = dist})
-        end
-    end
-
-    table.sort(others, function(a, b) return a.Dist < b.Dist end)
-
-    State.SelectedQueue = {}
-    for i = 1, 3 do
-        if others[i] then
-            table.insert(State.SelectedQueue, others[i].Player)
-        end
-    end
-end
-
--- Se já estiver ativado no load, seleciona imediatamente
-if Config.SelectAll then
-    AutoAssignTop3ByDistance()
-end
-
 -- Limpeza Limpa
 for _, gui in ipairs(CoreGui:GetChildren()) do
     if gui.Name == "DiamondADM_UI" or gui.Name == "LazuritaADM_MultiSlot" then gui:Destroy() end
@@ -199,7 +167,7 @@ local SlotColors = {
 }
 
 -- ==============================================================================
--- 4. FUNÇÕES LÓGICAS & SHARE CODE
+-- 4. FUNÇÕES LÓGICAS & UI PREP
 -- ==============================================================================
 local CachedRemote = nil
 local function GetCachedRemote()
@@ -280,6 +248,33 @@ local function LoadShareCode(codeStr)
     end
     ForceSaveConfig()
     return true
+end
+
+-- Declarar UI Functions antecipadamente para usar no AutoAssign
+local UpdatePlayerList = function() end -- Placeholder
+
+local function AutoAssignTop3ByDistance()
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    
+    if not myRoot then return end -- Segurança básica
+
+    local others = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local dist = (p.Character.HumanoidRootPart.Position - myRoot.Position).Magnitude
+            table.insert(others, {Player = p, Dist = dist})
+        end
+    end
+
+    table.sort(others, function(a, b) return a.Dist < b.Dist end)
+
+    State.SelectedQueue = {}
+    for i = 1, 3 do
+        if others[i] then
+            table.insert(State.SelectedQueue, others[i].Player)
+        end
+    end
 end
 
 -- ==============================================================================
@@ -440,7 +435,7 @@ local function GetPlayerSlot(p)
     return nil
 end
 
-local function UpdatePlayerList()
+UpdatePlayerList = function()
     local seen = {}
     
     for _, p in ipairs(Players:GetPlayers()) do
@@ -529,6 +524,27 @@ local function UpdatePlayerList()
             child:Destroy()
         end
     end
+end
+
+-- ==============================================================================
+-- LÓGICA DE INICIALIZAÇÃO CORRIGIDA (WAIT FOR CHARACTER)
+-- ==============================================================================
+if Config.SelectAll then
+    task.spawn(function()
+        -- Espera o personagem e RootPart estarem prontos
+        local attempts = 0
+        while attempts < 30 do -- Tenta por 3 segundos
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                break
+            end
+            attempts = attempts + 1
+            task.wait(0.1)
+        end
+        
+        -- Agora roda a lógica
+        AutoAssignTop3ByDistance()
+        UpdatePlayerList() -- Atualiza a lista visualmente
+    end)
 end
 
 SelectAllBtn.MouseButton1Click:Connect(function()
@@ -717,11 +733,11 @@ RRBtn.MouseButton1Click:Connect(function()
     ForceSaveConfig()
 end)
 
--- MOVED: Slot Selection Buttons (Now inside SettingsContainer, under Resolution)
+-- Slot Selection Buttons (Under Resolution)
 local SlotSelContainer = Instance.new("Frame")
 SlotSelContainer.Size = UDim2.new(0.95, 0, 0, 30)
 SlotSelContainer.BackgroundTransparency = 1
-SlotSelContainer.Parent = SettingsContainer -- Parented here instead of Scroll
+SlotSelContainer.Parent = SettingsContainer 
 
 local SlotGrid = Instance.new("UIGridLayout")
 SlotGrid.CellSize = UDim2.new(0.3, 0, 1, 0)
